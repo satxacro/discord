@@ -1,0 +1,54 @@
+name: Bootstrap from Discord
+
+# Run this once, from the Actions tab, to read your existing server and
+# generate the .tf files plus import blocks on a new branch. You then open a
+# pull request from that branch, check the plan says "0 to add, 0 to change,
+# 0 to destroy" (only imports), and merge.
+
+on:
+  workflow_dispatch:
+    inputs:
+      server_id:
+        description: "Discord server ID (Server Settings > Widget, or right-click the server icon > Copy Server ID)"
+        required: true
+        type: string
+
+jobs:
+  bootstrap:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.x"
+          terraform_wrapper: false
+
+      - name: Generate Terraform from the live server
+        env:
+          DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+          SERVER_ID: ${{ inputs.server_id }}
+        run: |
+          python3 scripts/bootstrap_from_discord.py --server-id "$SERVER_ID" | tee bootstrap.log
+          terraform fmt -recursive
+
+      - name: Push to a new branch
+        run: |
+          branch="bootstrap/import-${GITHUB_RUN_NUMBER}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git switch -c "$branch"
+          git add -A -- '*.tf' '*.tfvars'
+          git commit -m "Import existing Discord server into Terraform"
+          git push origin "$branch"
+          {
+            echo "## Generated config pushed to \`$branch\`"
+            echo
+            echo "[Open a pull request](${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}/compare/main...${branch}?expand=1)"
+            echo
+            echo '```'
+            cat bootstrap.log
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

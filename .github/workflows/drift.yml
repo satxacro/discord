@@ -1,0 +1,70 @@
+name: Drift check
+
+# Once a week, compare the live server with the repo. If someone changed
+# something by hand in Discord, open (or update) an issue showing the
+# difference so it can be copied into the repo or reverted.
+
+on:
+  schedule:
+    - cron: "17 14 * * 1" # Mondays 14:17 UTC
+  workflow_dispatch:
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+  DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+
+jobs:
+  drift:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.x"
+          terraform_wrapper: false
+
+      - name: Init
+        run: terraform init
+
+      - name: Plan
+        id: plan
+        run: |
+          set +e
+          terraform plan -no-color -detailed-exitcode -lock=false 2>&1 | tee plan.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" -eq 1 ]; then exit 1; fi
+          echo "drift=$([ "$code" -eq 2 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+
+      - name: Open or update drift issue
+        if: steps.plan.outputs.drift == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          title="Drift: Discord server differs from the repo"
+          {
+            echo "Someone changed the server directly in Discord, or a PR hasn't been deployed yet."
+            echo "Lines starting with \`~\`, \`+\` or \`-\` show what Terraform *would* change to make Discord match the repo."
+            echo
+            echo "To **keep** the manual change, update the .tf files to match and open a PR."
+            echo "To **undo** it, run Actions → Terraform → Run workflow."
+            echo
+            echo "<details><summary>Plan ($(date -u +%F))</summary>"
+            echo
+            echo '```'
+            tail -c 60000 plan.txt
+            echo '```'
+            echo "</details>"
+          } > body.md
+          num=$(gh issue list --state open --search "in:title \"$title\"" --json number --jq '.[0].number')
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --body-file body.md
+          else
+            gh issue create --title "$title" --body-file body.md
+          fi

@@ -1,0 +1,178 @@
+name: Terraform
+
+# Pull request  -> plan, and post the plan as a PR comment for review.
+# Merge to main -> plan + apply to the live Discord server.
+# Manual run    -> same as a merge; tick "allow_destroy" to let a run that
+#                  deletes channels/roles go through.
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      allow_destroy:
+        description: "Allow this run to delete or replace channels/roles (deleting a channel loses its message history)"
+        type: boolean
+        default: false
+
+env:
+  TF_IN_AUTOMATION: "true"
+  TF_INPUT: "false"
+  TF_TOKEN_app_terraform_io: ${{ secrets.TF_API_TOKEN }}
+  DISCORD_TOKEN: ${{ secrets.DISCORD_TOKEN }}
+
+jobs:
+  plan:
+    name: Plan
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    concurrency:
+      group: plan-${{ github.event.pull_request.number }}
+      cancel-in-progress: true
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.x"
+          terraform_wrapper: false
+
+      - name: Check formatting
+        id: fmt
+        continue-on-error: true
+        run: terraform fmt -check -recursive -diff
+
+      - name: Init
+        run: terraform init
+
+      - name: Validate
+        run: terraform validate -no-color
+
+      - name: Plan
+        id: plan
+        run: |
+          set -o pipefail
+          terraform plan -no-color -out=tfplan 2>&1 | tee plan.txt
+          terraform show -json tfplan > plan.json
+          deletes=$(jq -r '[.resource_changes[]? | select(.change.actions | index("delete")) | .address] | join(", ")' plan.json)
+          echo "deletes=$deletes" >> "$GITHUB_OUTPUT"
+
+      - name: Comment plan on PR
+        if: always() && steps.plan.outcome != 'skipped'
+        uses: actions/github-script@v7
+        env:
+          PLAN_OUTCOME: ${{ steps.plan.outcome }}
+          FMT_OUTCOME: ${{ steps.fmt.outcome }}
+          DELETES: ${{ steps.plan.outputs.deletes }}
+        with:
+          script: |
+            const fs = require('fs');
+            const marker = '<!-- terraform-plan -->';
+            let plan = fs.existsSync('plan.txt') ? fs.readFileSync('plan.txt', 'utf8') : 'No plan output.';
+            const summary = (plan.match(/^(Plan:.*|No changes\..*)$/m) || ['(see output)'])[0];
+            const max = 60000;
+            if (plan.length > max) plan = '…(truncated, see the Actions log for the full plan)…\n' + plan.slice(-max);
+
+            let body = `${marker}\n### Terraform plan ${process.env.PLAN_OUTCOME === 'success' ? '✅' : '❌'}\n\n**${summary}**\n\n`;
+            if (process.env.DELETES) {
+              body += `> [!WARNING]\n> This change **deletes or replaces**: \`${process.env.DELETES}\`.\n` +
+                      `> Deleting a channel permanently loses its messages. After merging, the deploy will stop ` +
+                      `until someone re-runs it from the Actions tab with **allow_destroy** ticked.\n\n`;
+            }
+            if (process.env.FMT_OUTCOME === 'failure') {
+              body += `> [!NOTE]\n> Formatting check failed. Run \`terraform fmt -recursive\` and push again.\n\n`;
+            }
+            body += `<details><summary>Full plan</summary>\n\n\`\`\`hcl\n${plan}\n\`\`\`\n</details>\n\n` +
+                    `_Updated for ${context.sha.slice(0, 7)} by @${context.actor}_`;
+
+            const { owner, repo } = context.repo;
+            const issue_number = context.issue.number;
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number });
+            const existing = comments.find(c => c.body && c.body.includes(marker));
+            if (existing) {
+              await github.rest.issues.updateComment({ owner, repo, comment_id: existing.id, body });
+            } else {
+              await github.rest.issues.createComment({ owner, repo, issue_number, body });
+            }
+
+      - name: Fail if formatting is off
+        if: steps.fmt.outcome == 'failure'
+        run: |
+          echo "::error::Run 'terraform fmt -recursive' and push again."
+          exit 1
+
+  apply:
+    name: Apply
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    # The "production" environment holds no extra secrets by default, but you can
+    # add required reviewers to it in Settings > Environments for a manual gate.
+    environment: production
+    permissions:
+      contents: read
+    concurrency:
+      group: terraform-apply
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          ref: ${{ github.event_name == 'workflow_dispatch' && 'main' || github.sha }}
+
+      - uses: hashicorp/setup-terraform@v4
+        with:
+          terraform_version: "1.x"
+          terraform_wrapper: false
+
+      - name: Init
+        run: terraform init
+
+      - name: Plan
+        id: plan
+        run: |
+          set +e
+          terraform plan -no-color -detailed-exitcode -out=tfplan 2>&1 | tee plan.txt
+          code=${PIPESTATUS[0]}
+          set -e
+          if [ "$code" -eq 1 ]; then exit 1; fi
+          echo "changes=$([ "$code" -eq 2 ] && echo true || echo false)" >> "$GITHUB_OUTPUT"
+          {
+            echo "## Terraform plan"
+            echo '```'
+            grep -E '^(Plan:|No changes\.)' plan.txt || true
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Guard against deleting channels or roles
+        if: steps.plan.outputs.changes == 'true'
+        env:
+          ALLOW_DESTROY: ${{ github.event_name == 'workflow_dispatch' && inputs.allow_destroy }}
+        run: |
+          deletes=$(terraform show -json tfplan | jq -r '.resource_changes[]? | select(.change.actions | index("delete")) | .address')
+          if [ -n "$deletes" ]; then
+            echo "This run would delete or replace:"
+            echo "$deletes" | sed 's/^/  - /'
+            if [ "$ALLOW_DESTROY" != "true" ]; then
+              echo "::error::Stopping before anything changed. If these deletions are intended, go to Actions > Terraform > Run workflow and tick allow_destroy."
+              {
+                echo "### ⛔ Stopped: this deploy would delete or replace"
+                echo "$deletes" | sed 's/^/- `/; s/$/`/'
+                echo
+                echo "Nothing was changed. If this is intended, re-run from **Actions → Terraform → Run workflow** with **allow_destroy** ticked."
+              } >> "$GITHUB_STEP_SUMMARY"
+              exit 1
+            fi
+            echo "allow_destroy is set; continuing."
+          fi
+
+      - name: Apply
+        if: steps.plan.outputs.changes == 'true'
+        run: terraform apply -no-color tfplan
+
+      - name: Nothing to do
+        if: steps.plan.outputs.changes == 'false'
+        run: echo "Discord already matches the repo; nothing to apply."

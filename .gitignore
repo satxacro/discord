@@ -16,6 +16,12 @@ crash.*.log
 *.tfvars
 *.tfvars.json
 
+# server.auto.tfvars only holds the (non-secret) server ID and must be committed
+!server.auto.tfvars
+
+# Ignore .env file which contains secrets (see .env.example)
+.env
+
 # Ignore override files as they are usually used to override resources locally and so
 # are not checked in
 override.tf
@@ -30,7 +36,8 @@ override.tf.json
 # !example_override.tf
 
 # Include tfplan files to ignore the plan output of command: terraform plan -out=tfplan
-# example: *tfplan*
+ *.tfplan
+ tfplan
 
 # Ignore CLI configuration files
 .terraformrc
