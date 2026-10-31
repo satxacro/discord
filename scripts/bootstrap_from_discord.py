@@ -296,6 +296,14 @@ def generate(snap: dict) -> tuple[dict[str, str], list[str]]:
     }
     sections: dict[int, list[str]] = {t: [] for t in by_type}
 
+    def overwrite_set(ch: dict) -> set:
+        return {
+            (str(o["id"]), int(o["type"]), int(o.get("allow", 0)), int(o.get("deny", 0)))
+            for o in ch.get("permission_overwrites", [])
+        }
+
+    by_id = {str(c["id"]): c for c in channels}
+
     # Categories first so other channels can reference them.
     ordered = sorted(channels, key=lambda c: (c["type"] != CH_CATEGORY, c.get("position", 0)))
     for c in ordered:
@@ -312,13 +320,21 @@ def generate(snap: dict) -> tuple[dict[str, str], list[str]]:
         if ctype != CH_CATEGORY and parent and str(parent) in ch_ref:
             attrs.append(("category", Raw(f"{ch_ref[str(parent)]}.id")))
         attrs.append(("position", int(c.get("position", 0))))
-        if ctype == CH_TEXT:
+        if ctype != CH_CATEGORY:
+            # The provider defaults this to true, which would overwrite a channel's
+            # own permissions with its category's. Write the real state instead,
+            # using the same rule the provider uses to read it back: synced means
+            # the channel's overrides exactly match its category's.
+            parent_ch = by_id.get(str(parent)) if parent else None
+            synced = parent_ch is not None and overwrite_set(c) == overwrite_set(parent_ch)
+            attrs.append(("sync_perms_with_category", synced))
+        if ctype in (CH_TEXT, CH_NEWS):
             if c.get("topic"):
                 attrs.append(("topic", c["topic"]))
             if c.get("nsfw"):
                 attrs.append(("nsfw", True))
-            if c.get("rate_limit_per_user"):
-                attrs.append(("rate_limit_per_user", int(c["rate_limit_per_user"])))
+            # Slowmode (rate_limit_per_user) isn't supported by provider 2.7.0,
+            # so it stays managed in Discord for now.
         if ctype == CH_VOICE:
             if c.get("bitrate"):
                 attrs.append(("bitrate", int(c["bitrate"])))
