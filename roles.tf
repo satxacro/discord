@@ -30,7 +30,7 @@ resource "discord_role" "mid" {
   hoist       = false
   mentionable = false
   position    = 3
-  permissions = data.discord_permission.role_mid.allow_bits
+  permissions = data.discord_permission.member.allow_bits
 }
 
 resource "discord_role" "flyer" {
@@ -40,7 +40,7 @@ resource "discord_role" "flyer" {
   hoist       = false
   mentionable = false
   position    = 2
-  permissions = data.discord_permission.role_flyer.allow_bits
+  permissions = data.discord_permission.member.allow_bits
 }
 
 resource "discord_role" "base" {
@@ -50,7 +50,7 @@ resource "discord_role" "base" {
   hoist       = false
   mentionable = false
   position    = 1
-  permissions = data.discord_permission.role_base.allow_bits
+  permissions = data.discord_permission.member.allow_bits
 }
 
 # ---- What each role is allowed to do server-wide
@@ -80,8 +80,4 @@ data "discord_permission" "role_mod" {
   view_audit_log    = "allow"
 }
 
-data "discord_permission" "role_mid" {}
-
-data "discord_permission" "role_flyer" {}
-
-data "discord_permission" "role_base" {}
+data "discord_permission" "member" {}
