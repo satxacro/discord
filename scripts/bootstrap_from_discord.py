@@ -283,7 +283,9 @@ def generate(snap: dict) -> tuple[dict[str, str], list[str]]:
     files["roles.tf"] = roles_tf
 
     # ---- channels
-    ch_names = Namer()
+    # Terraform names only need to be unique per resource type, so a text
+    # #general and a voice General can both be called "general".
+    ch_names: dict[str, Namer] = {}
     ch_ref: dict[str, str] = {}
     by_type = {
         CH_CATEGORY: "discord_category_channel",
@@ -303,7 +305,7 @@ def generate(snap: dict) -> tuple[dict[str, str], list[str]]:
             kind = "stage channel" if ctype == CH_STAGE else f"channel type {ctype}"
             skipped.append(f"{kind} '{c['name']}' (not supported by the provider; manage it in Discord)")
             continue
-        tf = ch_names(c["name"], f"channel_{cid}")
+        tf = ch_names.setdefault(rtype, Namer())(c["name"], f"channel_{cid}")
         ch_ref[cid] = f"{rtype}.{tf}"
         attrs: list[tuple[str, object]] = [("server_id", Raw("var.server_id")), ("name", c["name"])]
         parent = c.get("parent_id")
