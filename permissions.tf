@@ -34,7 +34,7 @@ data "discord_permission" "ow_rules_everyone" {
 }
 
 resource "discord_channel_permission" "rules_everyone" {
-  channel_id   = discord_text_channel.rules.id
+  channel_id   = discord_text_channel.text["rules"].id
   type         = "role"
   overwrite_id = var.server_id
   allow        = data.discord_permission.ow_rules_everyone.allow_bits
@@ -47,7 +47,7 @@ data "discord_permission" "ow_rules_mod" {
 }
 
 resource "discord_channel_permission" "rules_mod" {
-  channel_id   = discord_text_channel.rules.id
+  channel_id   = discord_text_channel.text["rules"].id
   type         = "role"
   overwrite_id = discord_role.mod.id
   allow        = data.discord_permission.ow_rules_mod.allow_bits
@@ -60,7 +60,7 @@ data "discord_permission" "ow_announcements_everyone" {
 }
 
 resource "discord_channel_permission" "announcements_everyone" {
-  channel_id   = discord_news_channel.announcements.id
+  channel_id   = discord_news_channel.news["announcements"].id
   type         = "role"
   overwrite_id = var.server_id
   deny         = data.discord_permission.ow_announcements_everyone.deny_bits
@@ -72,7 +72,7 @@ data "discord_permission" "ow_organizer_posts" {
 }
 
 resource "discord_channel_permission" "announcements_mod" {
-  channel_id   = discord_news_channel.announcements.id
+  channel_id   = discord_news_channel.news["announcements"].id
   type         = "role"
   overwrite_id = discord_role.mod.id
   allow        = data.discord_permission.ow_organizer_posts.allow_bits
@@ -85,14 +85,14 @@ data "discord_permission" "ow_read_only_everyone" {
 }
 
 resource "discord_channel_permission" "jam_schedule_everyone" {
-  channel_id   = discord_text_channel.jam_schedule.id
+  channel_id   = discord_text_channel.text["jam_schedule"].id
   type         = "role"
   overwrite_id = var.server_id
   deny         = data.discord_permission.ow_read_only_everyone.deny_bits
 }
 
 resource "discord_channel_permission" "jam_schedule_mod" {
-  channel_id   = discord_text_channel.jam_schedule.id
+  channel_id   = discord_text_channel.text["jam_schedule"].id
   type         = "role"
   overwrite_id = discord_role.mod.id
   allow        = data.discord_permission.ow_organizer_posts.allow_bits
@@ -110,14 +110,14 @@ data "discord_permission" "ow_private_mod" {
 
 # The category: #event-planning and #mod-log copy these.
 resource "discord_channel_permission" "organizers_everyone" {
-  channel_id   = discord_category_channel.organizers.id
+  channel_id   = discord_category_channel.category["organizers"].id
   type         = "role"
   overwrite_id = var.server_id
   deny         = data.discord_permission.ow_private_everyone.deny_bits
 }
 
 resource "discord_channel_permission" "organizers_mod" {
-  channel_id   = discord_category_channel.organizers.id
+  channel_id   = discord_category_channel.category["organizers"].id
   type         = "role"
   overwrite_id = discord_role.mod.id
   allow        = data.discord_permission.ow_private_mod.allow_bits
@@ -125,14 +125,14 @@ resource "discord_channel_permission" "organizers_mod" {
 
 # #mod-chat keeps its own copy of the same two rules.
 resource "discord_channel_permission" "mod_chat_everyone" {
-  channel_id   = discord_text_channel.mod_chat.id
+  channel_id   = discord_text_channel.text["mod_chat"].id
   type         = "role"
   overwrite_id = var.server_id
   deny         = data.discord_permission.ow_private_everyone.deny_bits
 }
 
 resource "discord_channel_permission" "mod_chat_mod" {
-  channel_id   = discord_text_channel.mod_chat.id
+  channel_id   = discord_text_channel.text["mod_chat"].id
   type         = "role"
   overwrite_id = discord_role.mod.id
   allow        = data.discord_permission.ow_private_mod.allow_bits
